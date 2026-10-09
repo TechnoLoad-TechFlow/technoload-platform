@@ -13,7 +13,7 @@ const sessionLifetimeMs = Number(process.env.AUTH_SESSION_TTL_HOURS || 12) * 60 
 async function database() { return JSON.parse(await readFile(databasePath, 'utf8')); }
 async function persist(data) { await writeFile(databasePath, `${JSON.stringify(data, null, 2)}\n`); }
 function send(response, status, value) {
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' });
   response.end(JSON.stringify(value));
 }
 async function body(request) { let raw = ''; for await (const chunk of request) raw += chunk; return raw ? JSON.parse(raw) : {}; }
@@ -80,6 +80,20 @@ createServer(async (request, response) => {
       data.sessions = data.sessions.filter((session) => session.token !== token);
       await persist(data);
       return send(response, 204, null);
+    }
+    if (url.pathname === '/api/v1/admin/users' && request.method === 'GET') {
+      const user = authRequired(request, response, data, 'ADMIN');
+      return user && send(response, 200, data.users.map(publicUser));
+    }
+    if (url.pathname === '/api/v1/admin/overview' && request.method === 'GET') {
+      const user = authRequired(request, response, data, 'ADMIN');
+      if (!user) return;
+      return send(response, 200, {
+        users: data.users.length,
+        pendingPurchases: data.purchases.filter((purchase) => purchase.status === 'PENDING_APPROVAL').length,
+        openIncidents: data.incidents.filter((incident) => incident.status !== 'RESOLVED').length,
+        activeSubscriptions: data.subscriptions.filter((subscription) => subscription.status === 'ACTIVE').length
+      });
     }
     const [, api, version, resource, id] = url.pathname.split('/');
     if (api !== 'api' || version !== 'v1' || !resources.has(resource)) return send(response, 404, { message: 'Resource not found.' });
