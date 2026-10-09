@@ -10,7 +10,11 @@ const port = Number(process.env.PORT || 8080);
 const resources = new Set(['assets', 'maintenance', 'operations', 'plans', 'subscriptions']);
 const sessionLifetimeMs = Number(process.env.AUTH_SESSION_TTL_HOURS || 12) * 60 * 60 * 1000;
 
-async function database() { return JSON.parse(await readFile(databasePath, 'utf8')); }
+const defaultDatabase = () => ({
+  assets: [{ id: 'A-001', name: 'CAT 320 Excavator', type: 'Machinery', usage: 1842, status: 'AVAILABLE' }, { id: 'A-002', name: 'Volvo FMX Dump Truck', type: 'Dump truck', usage: 64500, status: 'IN_OPERATION' }, { id: 'A-003', name: 'XCMG QY25K Crane', type: 'Crane', usage: 3250, status: 'IN_MAINTENANCE' }],
+  maintenance: [], operations: [], plans: [{ id: 'starter', name: 'Starter', monthlyPrice: 149, currency: 'PEN' }, { id: 'professional', name: 'Professional', monthlyPrice: 349, currency: 'PEN' }], subscriptions: [], users: [{ id: 'USR-ADMIN-001', name: 'TechFlow Administrator', email: 'admin@technoload.pe', role: 'ADMIN', organization: 'TechnoLoad Demo', passwordSalt: 'aa93e4ecdcd7a39adb36ae1cea9adfa9', passwordHash: '0957295b0bbe656f6f8464f7ae7d71093905d282b26e7b834b3d2a7112d595dbf250f8030529a9caad412b9ebc35b6e4a8df2b2e72fccedf57be198b2fb21e21' }, { id: 'USR-USER-001', name: 'Demo Customer', email: 'user@technoload.pe', role: 'USER', organization: 'Demo Construction', passwordSalt: '14ba84e9ab06425085797a85a4dbb51b', passwordHash: 'f1482f89ab33bb3be9a541b3ea9cc51e816fda1d06cc8ac4f2b40e81e3d821a49c77c4460f4103648c72b96f470ecba06a3b3eee264ac47871ccf68bf76201cb' }], sessions: [], purchases: [], rentals: [], payments: [], incidents: [], notifications: []
+});
+async function database() { try { return JSON.parse(await readFile(databasePath, 'utf8')); } catch (error) { if (error.code === 'ENOENT') return defaultDatabase(); throw error; } }
 async function persist(data) { await writeFile(databasePath, `${JSON.stringify(data, null, 2)}\n`); }
 function send(response, status, value) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' });
