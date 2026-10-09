@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const databasePath = process.env.DB_PATH || path.join(directory, 'db.json');
 const port = Number(process.env.PORT || 8080);
-const resources = new Set(['assets', 'maintenance', 'operations', 'plans', 'subscriptions', 'purchases', 'incidents', 'notifications']);
+const resources = new Set(['assets', 'maintenance', 'operations', 'plans', 'subscriptions']);
 const sessionLifetimeMs = Number(process.env.AUTH_SESSION_TTL_HOURS || 12) * 60 * 60 * 1000;
 
 async function database() { return JSON.parse(await readFile(databasePath, 'utf8')); }
@@ -39,6 +39,15 @@ function authRequired(request, response, data, role) {
   if (!user) { send(response, 401, { message: 'Authentication required.' }); return null; }
   if (role && user.role !== role) { send(response, 403, { message: 'Insufficient permissions.' }); return null; }
   return user;
+}
+function notify(data, userId, title, message, type = 'INFO') {
+  data.notifications ||= [];
+  data.notifications.unshift({ id: `NOT-${randomUUID()}`, userId, title, message, type, read: false, createdAt: new Date().toISOString() });
+}
+function rentalDays(startDate, endDate) { return Math.ceil((new Date(endDate) - new Date(startDate)) / 86400000) + 1; }
+function rentalEligible(asset, startDate, endDate) {
+  const days = rentalDays(startDate, endDate);
+  return Boolean(asset && asset.status === 'AVAILABLE' && Number.isInteger(days) && days > 0 && days <= 30 && new Date(startDate) >= new Date(new Date().toISOString().slice(0, 10)));
 }
 
 createServer(async (request, response) => {
@@ -94,6 +103,81 @@ createServer(async (request, response) => {
         openIncidents: data.incidents.filter((incident) => incident.status !== 'RESOLVED').length,
         activeSubscriptions: data.subscriptions.filter((subscription) => subscription.status === 'ACTIVE').length
       });
+    }
+    if (url.pathname === '/api/v1/catalog/assets' && request.method === 'GET') {
+      return send(response, 200, data.assets.filter((asset) => asset.status === 'AVAILABLE'));
+    }
+    if (url.pathname === '/api/v1/customer/overview' && request.method === 'GET') {
+      const user = authRequired(request, response, data);
+      if (!user) return;
+      return send(response, 200, {
+        rentals: data.rentals.filter((rental) => rental.userId === user.id),
+        subscriptions: data.subscriptions.filter((subscription) => subscription.userId === user.id),
+        notifications: data.notifications.filter((notification) => notification.userId === user.id).slice(0, 20)
+      });
+    }
+    if (url.pathname === '/api/v1/rentals' && request.method === 'POST') {
+      const user = authRequired(request, response, data);
+      if (!user || user.role === 'ADMIN') return;
+      const input = await body(request);
+      const asset = data.assets.find((item) => item.id === input.assetId);
+      const eligible = rentalEligible(asset, input.startDate, input.endDate);
+      if (!asset || !input.startDate || !input.endDate) return send(response, 422, { message: 'Choose an available asset, start date and end date.' });
+      const rental = { id: `RNT-${randomUUID()}`, userId: user.id, assetId: asset.id, startDate: input.startDate, endDate: input.endDate, days: rentalDays(input.startDate, input.endDate), status: eligible ? 'AUTO_APPROVED' : 'PENDING_REVIEW', createdAt: new Date().toISOString() };
+      data.rentals.unshift(rental);
+      if (eligible) asset.status = 'RESERVED';
+      notify(data, user.id, eligible ? 'Reservation approved' : 'Reservation under review', eligible ? `${asset.name} was automatically reserved for your selected dates.` : 'Your request needs an administrator review.');
+      data.users.filter((item) => item.role === 'ADMIN').forEach((admin) => notify(data, admin.id, 'New rental request', `${user.name} requested ${asset.name}.`, 'RENTAL'));
+      await persist(data);
+      return send(response, 201, rental);
+    }
+    if (url.pathname === '/api/v1/subscriptions/checkout' && request.method === 'POST') {
+      const user = authRequired(request, response, data);
+      if (!user || user.role === 'ADMIN') return;
+      const input = await body(request);
+      const plan = data.plans.find((item) => item.id === input.planId);
+      if (!plan || plan.monthlyPrice === null) return send(response, 422, { message: 'Choose an available monthly plan.' });
+      const payment = { id: `PAY-${randomUUID()}`, userId: user.id, planId: plan.id, amount: plan.monthlyPrice, currency: plan.currency, provider: 'SANDBOX', method: input.method === 'CARD' ? 'CARD' : 'YAPE', status: 'PAID', createdAt: new Date().toISOString() };
+      data.payments.unshift(payment);
+      const subscription = { id: `SUB-${randomUUID()}`, userId: user.id, organization: user.organization, planId: plan.id, status: 'ACTIVE', startedAt: new Date().toISOString(), paymentId: payment.id };
+      data.subscriptions.unshift(subscription);
+      notify(data, user.id, 'Membership activated', `${plan.name} is active. Your benefits and priority level are now applied.`, 'SUBSCRIPTION');
+      await persist(data);
+      return send(response, 201, { subscription, payment });
+    }
+    if (url.pathname === '/api/v1/incidents' && request.method === 'POST') {
+      const user = authRequired(request, response, data);
+      if (!user || user.role === 'ADMIN') return;
+      const input = await body(request);
+      const asset = data.assets.find((item) => item.id === input.assetId);
+      if (!asset || !String(input.description || '').trim()) return send(response, 422, { message: 'Choose an asset and describe the issue.' });
+      const incident = { id: `INC-${randomUUID()}`, userId: user.id, assetId: asset.id, description: String(input.description).trim(), status: 'OPEN', createdAt: new Date().toISOString() };
+      data.incidents.unshift(incident); asset.status = 'IN_MAINTENANCE';
+      notify(data, user.id, 'Issue reported', `We notified the operations team about ${asset.name}.`, 'INCIDENT');
+      data.users.filter((item) => item.role === 'ADMIN').forEach((admin) => notify(data, admin.id, 'New equipment issue', `${user.name} reported an issue with ${asset.name}.`, 'INCIDENT'));
+      await persist(data);
+      return send(response, 201, incident);
+    }
+    if (url.pathname === '/api/v1/notifications/read' && request.method === 'POST') {
+      const user = authRequired(request, response, data);
+      if (!user) return;
+      data.notifications.filter((notification) => notification.userId === user.id).forEach((notification) => { notification.read = true; });
+      await persist(data); return send(response, 200, { ok: true });
+    }
+    if (url.pathname === '/api/v1/admin/requests' && request.method === 'GET') {
+      const user = authRequired(request, response, data, 'ADMIN');
+      if (!user) return;
+      return send(response, 200, { rentals: data.rentals, incidents: data.incidents, payments: data.payments, subscriptions: data.subscriptions });
+    }
+    if (url.pathname.startsWith('/api/v1/admin/rentals/') && url.pathname.endsWith('/decision') && request.method === 'POST') {
+      const user = authRequired(request, response, data, 'ADMIN');
+      if (!user) return;
+      const rentalId = url.pathname.split('/')[5]; const rental = data.rentals.find((item) => item.id === rentalId); const input = await body(request);
+      if (!rental) return send(response, 404, { message: 'Rental request not found.' });
+      rental.status = input.approved ? 'APPROVED' : 'REJECTED';
+      const asset = data.assets.find((item) => item.id === rental.assetId); if (input.approved && asset) asset.status = 'RESERVED';
+      notify(data, rental.userId, input.approved ? 'Reservation approved' : 'Reservation declined', `Your rental request was ${input.approved ? 'approved' : 'declined'} by an administrator.`, 'RENTAL');
+      await persist(data); return send(response, 200, rental);
     }
     const [, api, version, resource, id] = url.pathname.split('/');
     if (api !== 'api' || version !== 'v1' || !resources.has(resource)) return send(response, 404, { message: 'Resource not found.' });
