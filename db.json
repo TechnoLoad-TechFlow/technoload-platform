@@ -1,14 +1,22 @@
 {
   "assets": [
-    {"id":"A-001","name":"Excavadora CAT 320","type":"Maquinaria","usage":1842,"status":"AVAILABLE"},
-    {"id":"A-002","name":"Volquete Volvo FMX","type":"Volquete","usage":64500,"status":"IN_OPERATION"},
-    {"id":"A-003","name":"Grúa XCMG QY25K","type":"Grúa","usage":3250,"status":"IN_MAINTENANCE"}
+    {"id":"A-001","name":"CAT 320 Excavator","type":"Machinery","usage":1842,"status":"AVAILABLE"},
+    {"id":"A-002","name":"Volvo FMX Dump Truck","type":"Dump truck","usage":64500,"status":"IN_OPERATION"},
+    {"id":"A-003","name":"XCMG QY25K Crane","type":"Crane","usage":3250,"status":"IN_MAINTENANCE"}
   ],
   "maintenance": [
     {"id":"M-201","assetId":"A-003","type":"CORRECTIVE","scheduledAt":"2026-10-10","status":"SCHEDULED"},
     {"id":"M-202","assetId":"A-001","type":"PREVENTIVE","scheduledAt":"2026-10-15","status":"SCHEDULED"}
   ],
   "operations": [
-    {"id":"OP-31","route":"Lima → Ica","assetId":"A-002","driver":"Marco López","status":"IN_PROGRESS"}
+    {"id":"OP-31","route":"Lima → Ica","assetId":"A-002","driver":"Marco Lopez","status":"IN_PROGRESS"}
+  ],
+  "plans": [
+    {"id":"starter","name":"Starter","monthlyPrice":149,"currency":"PEN","assetLimit":10,"features":["Fleet inventory","Maintenance calendar"]},
+    {"id":"professional","name":"Professional","monthlyPrice":349,"currency":"PEN","assetLimit":50,"features":["Rentals","Dispatches","Operational reports"]},
+    {"id":"enterprise","name":"Enterprise","monthlyPrice":null,"currency":"PEN","assetLimit":null,"features":["Unlimited assets","Priority support","Custom integrations"]}
+  ],
+  "subscriptions": [
+    {"id":"SUB-001","organization":"TechnoLoad Demo","planId":"professional","status":"ACTIVE","startedAt":"2026-10-01"}
   ]
 }

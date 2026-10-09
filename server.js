@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const databasePath = process.env.DB_PATH || path.join(directory, 'db.json');
 const port = Number(process.env.PORT || 8080);
-const resources = new Set(['assets', 'maintenance', 'operations']);
+const resources = new Set(['assets', 'maintenance', 'operations', 'plans', 'subscriptions']);
 
 async function database() { return JSON.parse(await readFile(databasePath, 'utf8')); }
 async function persist(data) { await writeFile(databasePath, `${JSON.stringify(data, null, 2)}\n`); }
